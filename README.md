@@ -5,6 +5,9 @@ An interactive Web3D product/model showcase — a public photo + 3D gallery on t
 
 <img width="1914" height="989" alt="image" src="https://github.com/user-attachments/assets/001a17a3-c9d6-4b09-a886-c277626a2220" />
 
+<img width="1915" height="1002" alt="image" src="https://github.com/user-attachments/assets/2f46833c-d590-4308-b42b-30e5c0eaef0c" />
+
+<img width="1917" height="1047" alt="image" src="https://github.com/user-attachments/assets/ae839d0e-718c-4124-8e36-daf61ee7a1a0" />
 
 
 
@@ -157,8 +160,6 @@ The server (`server.ts`) rejects the connection unless the token is valid and th
 - The public gallery/lightbox UI and the admin dashboard's live-feed UI are the next layer to build on top of these APIs and socket events.
 - Refresh-token rotation and rate limiting on `/api/auth/login` and the upload endpoints are designed in principle but not all enforced yet at every route.
 
-```<img width="1915" height="1002" alt="image" src="https://github.com/user-attachments/assets/2f46833c-d590-4308-b42b-30e5c0eaef0c" />
 
-<img width="1917" height="1047" alt="image" src="https://github.com/user-attachments/assets/ae839d0e-718c-4124-8e36-daf61ee7a1a0" />
 ## 9. Deployment
 - Repository: https://github.com/zaima-sohail/web3d-showcase
