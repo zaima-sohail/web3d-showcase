@@ -40,6 +40,13 @@ export default function Sidebar() {
           ☁ Uploads
         </Link>
 
+        <Link
+          href="/admin/users"
+          className="block hover:text-blue-400"
+        >
+          👥 Users
+        </Link>
+
       </nav>
 
     </aside>
