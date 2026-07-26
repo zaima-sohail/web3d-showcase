@@ -126,7 +126,11 @@ import { io } from "socket.io-client";
 const socket = io({ path: "/ws", auth: { token: accessToken } });
 socket.on("activity:new", (payload) => { /* update activity feed */ });
 socket.on("job:progress", (payload) => { /* update upload progress bar */ });
-```
+```<img width="1915" height="1002" alt="image" src="https://github.com/user-attachments/assets/2f46833c-d590-4308-b42b-30e5c0eaef0c" />
+
+<img width="1917" height="1047" alt="image" src="https://github.com/user-attachments/assets/ae839d0e-718c-4124-8e36-daf61ee7a1a0" />
+
+
 
 The server (`server.ts`) rejects the connection unless the token is valid and the role is `admin` or `editor` — enforced in `io.use()` middleware, not left to the client.
 
