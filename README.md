@@ -3,8 +3,9 @@
 An interactive Web3D product/model showcase — a public photo + 3D gallery on the front end, and an admin panel with a live upload/processing dashboard on the back end. Built for the Khizex Full-Stack Internship Week 3 assignment.
 <img width="1918" height="995" alt="image" src="https://github.com/user-attachments/assets/60f83349-1bd4-4ab5-9fef-0acc9f2e14e8" />
 
+<img width="1914" height="989" alt="image" src="https://github.com/user-attachments/assets/001a17a3-c9d6-4b09-a886-c277626a2220" />
 
-![Uploading image.png…]()
+
 
 
 
