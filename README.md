@@ -1,36 +1,149 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Khizex Web3D Model Showcase
 
-## Getting Started
+An interactive Web3D product/model showcase — a public photo + 3D gallery on the front end, and an admin panel with a live upload/processing dashboard on the back end. Built for the Khizex Full-Stack Internship Week 3 assignment.
 
-First, run the development server:
+## 1. Tech Stack
+
+| Layer | Choice |
+|---|---|
+| Framework | Next.js 14 (App Router) — frontend + backend API routes in one codebase |
+| Database | MongoDB via Mongoose |
+| Auth | JWT (httpOnly cookie, with `Authorization: Bearer` fallback for API clients), bcrypt password hashing |
+| Validation | Zod (all request bodies/query params) |
+| Real-time | Socket.IO, attached to a custom Node HTTP server |
+| Image processing | `sharp` (responsive WebP thumbnails) |
+| File-content validation | `file-type` (images) + manual glTF-Binary header check (`.glb` models) |
+| Language | Strict TypeScript throughout (`"strict": true`, no `any`) |
+|cloudinary| 
+
+## 2. Setup
+
+```bash
+npm install
+```
+
+Create a `.env.local` in the project root (never commit this file):
+
+```env
+MONGODB_URI=
+JWT_SECRET=
+CORS_ORIGIN=http://localhost:3000
+PORT=3000
+MAX_IMAGE_SIZE_MB=15
+MAX_MODEL_SIZE_MB=80
+```
+
+Run the dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+This starts a **custom server** (`server.ts`) that boots Next.js and attaches a Socket.IO server to the same HTTP server. Plain `next dev` cannot host a persistent WebSocket connection on its own, since App Router route handlers are stateless request/response functions — the live admin dashboard needs a long-lived connection, hence the custom server.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 3. Architecture Overview
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/                    → Next.js App Router pages + API route handlers
+  api/
+    auth/{register,login,logout,me}/route.ts
+    categories/route.ts
+    items/route.ts, items/[slug]/route.ts
+    items/[itemId]/photos/route.ts   → bulk photo upload
+    items/[itemId]/model/route.ts    → .glb model upload
+    photos/[photoId]/route.ts        → delete photo
+    models/[modelId]/route.ts        → delete model
+src/
+  lib/
+    mongodb.ts          → DB connection singleton
+    jwt.ts               → sign/verify JWT
+    hash.ts              → bcrypt helpers
+    authGuard.ts          → getAuthUser / requireAuth / requireRole (RBAC gate)
+    apiError.ts           → maps thrown errors to consistent JSON responses
+    fileValidation.ts     → real file-content checks (never trusts extension/MIME alone)
+    storage.ts             → local-disk storage paths (swap for S3/R2 in production)
+    socket.ts               → emitJobProgress / emitActivity — broadcasts to the live dashboard
+    validations/            → Zod schemas per resource
+  models/                    → Mongoose schemas: User, Category, Item, Photo, Model3D, UploadJob
+  services/                   → business logic: photoUpload.service.ts, modelUpload.service.ts
+server.ts                      → custom Next.js + Socket.IO entry point (replaces `next dev`)
+```
 
-## Learn More
+Every route handler follows the same shape: `requireAuth(req)` / `requireRole(...)` where the endpoint is protected → validate the body with Zod → touch the database → optionally `emitActivity()` / `emitJobProgress()` → return a consistent `{ success, ... }` JSON response. Errors are never left as bare 500s — `handleApiError` maps `AuthError` → 401/403, `ZodError` → 400 with field-level detail, anything else → 500 with a generic client message and a server-side logged stack trace.
 
-To learn more about Next.js, take a look at the following resources:
+## 4. Role-Based Authorization
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Every write endpoint calls `requireAuth(req)` — which verifies the JWT from the httpOnly cookie or an `Authorization: Bearer` header — followed by `requireRole(user, ...allowedRoles)`. No route ever trusts a client-supplied `userId` or `role`; both are re-derived server-side from the verified token on every request, and `/api/auth/me` re-reads the role from the database (not just the token) so a demoted or deleted account loses access immediately.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Endpoint | Method | Auth | Allowed roles |
+|---|---|---|---|
+| `/api/auth/register` | POST | No | — |
+| `/api/auth/login` | POST | No | — |
+| `/api/auth/logout` | POST | No | — |
+| `/api/auth/me` | GET | Yes | any logged-in user |
+| `/api/categories` | GET | No | — (public) |
+| `/api/categories` | POST | Yes | `admin`, `editor` |
+| `/api/items` | GET | No | — (public, only `status: published`, paginated) |
+| `/api/items` | POST | Yes | `admin`, `editor` |
+| `/api/items/[slug]` | GET | No | — (public, only published; increments view count) |
+| `/api/items/[slug]` | PATCH | Yes | `admin`, `editor` |
+| `/api/items/[slug]` | DELETE | Yes | `admin` only |
+| `/api/items/[itemId]/photos` | POST | Yes | `admin`, `editor` |
+| `/api/photos/[photoId]` | DELETE | Yes | `admin`, `editor` |
+| `/api/items/[itemId]/model` | POST | Yes | `admin`, `editor` |
+| `/api/models/[modelId]` | DELETE | Yes | `admin`, `editor` |
 
-## Deploy on Vercel
+## 5. Asset Upload Pipeline
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**Photos** (`/api/items/[itemId]/photos`, multipart form field `photos`, multiple files):
+1. Real file-content validation via `file-type` (magic bytes) — a renamed `.exe` claiming to be a `.jpg` is rejected, regardless of what extension/MIME the client sends.
+2. `sharp` generates three responsive WebP sizes (320 / 800 / 1600px) so the public gallery never ships an oversized original to a phone.
+3. Each upload is tracked as an `UploadJob` document, keyed by a client-generated **idempotency key** (`${itemId}:${fileName}:${fileSize}`) — a retried/duplicated request updates the existing job instead of creating a duplicate `Photo`.
+4. Progress is broadcast at each thumbnail step via `emitJobProgress` (Socket.IO event `job:progress`) so the admin dashboard updates live without polling.
+5. Deleting a photo removes the Mongo document **and** every stored size variant from disk — no orphaned files.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**3D models** (`/api/items/[itemId]/model`, multipart field `model`):
+1. Structural validation reads the raw GLB header bytes (magic number `glTF`, binary format version, declared length vs. actual file size) — this catches a corrupt or fake `.glb` that a naive extension check would miss.
+2. Same idempotency-key + `UploadJob` + live-progress pattern as photos.
+3. Stored under `/public/uploads/models`, served directly by Next.js. **Not yet Draco/Meshopt-compressed** — see tradeoffs below.
+
+**Storage note:** files are currently written to local disk under `public/uploads/` for demo simplicity (Next.js serves them directly, no extra static route needed). In a production deployment this should be swapped for signed direct-to-S3/R2 uploads, with the returned CDN URL stored on the `Photo`/`Model3D` document instead of a local path — the service functions in `src/services/` are structured so only the "write bytes" step needs to change.
+
+## 6. Live Admin Dashboard (Socket.IO)
+
+Client connects with the current JWT as the handshake auth token:
+
+```typescript
+import { io } from "socket.io-client";
+
+const socket = io({ path: "/ws", auth: { token: accessToken } });
+socket.on("activity:new", (payload) => { /* update activity feed */ });
+socket.on("job:progress", (payload) => { /* update upload progress bar */ });
+```
+
+The server (`server.ts`) rejects the connection unless the token is valid and the role is `admin` or `editor` — enforced in `io.use()` middleware, not left to the client.
+
+| Event | Fired when | Payload |
+|---|---|---|
+| `activity:new` | Item created / published / viewed / deleted | `{ kind, itemId, itemName, at }` |
+| `job:progress` | Photo or model upload progresses through validation → processing → done/failed | `{ jobId, fileName, type, status, progress, errorMsg? }` |
+
+## 7. Data Model Summary
+
+- **User** — `name, email, password (bcrypt-hashed), role (admin/editor/viewer)`
+- **Category** — `name, slug`
+- **Item** — `name, slug, description, status (draft/published/archived), category (ref), tags[], viewCount, coverPhoto (ref)`; indexed on `{status, createdAt}` and text-indexed on `name` for search
+- **Photo** — `item (ref), storageKey, url, thumbUrl, width, height, order, isCover`
+- **Model3D** — `item (ref), storageKey, url, sizeBytes, compressed`
+- **UploadJob** — `item (ref), type, status, progress, fileName, errorMsg, idempotencyKey (unique)` — this collection is what makes the live dashboard and idempotency guarantee possible
+
+## 8. Tradeoffs & What I'd Improve With More Time
+
+- Model compression (Draco/Meshopt geometry, KTX2 textures) is designed for but not wired into the upload pipeline yet — models are stored as-uploaded.
+- Local-disk storage under `public/uploads/` is fine for this assignment's scope but should move to S3/R2 with signed upload URLs before any real production use.
+- No persisted job history pruning yet — `UploadJob` documents accumulate; a TTL index or periodic cleanup would be the next addition.
+- The public gallery/lightbox UI and the admin dashboard's live-feed UI are the next layer to build on top of these APIs and socket events.
+- Refresh-token rotation and rate limiting on `/api/auth/login` and the upload endpoints are designed in principle but not all enforced yet at every route.
+
+## 9. Deployment
+- Repository: https://github.com/zaima-sohail/web3d-showcase
